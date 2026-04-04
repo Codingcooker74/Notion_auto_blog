@@ -1,0 +1,5 @@
+desktop.ini
+.env
+*.json
+*.log
+__pycache__/
