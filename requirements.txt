@@ -1,0 +1,3 @@
+notion-client
+google-generativeai
+python-dotenv
