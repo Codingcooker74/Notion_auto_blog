@@ -3,8 +3,19 @@ import datetime
 import sys
 import time
 import re
+import json
+import urllib.request
+
+# 한글 출력 깨짐 방지 (Windows 환경 대응 강화)
+try:
+    if sys.stdout.encoding.lower() != 'utf-8':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+except Exception:
+    pass
+
 from notion_client import Client
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -19,10 +30,49 @@ if missing_vars:
     sys.exit(1)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# 신형 라이브러리 클라이언트 초기화
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 notion = Client(auth=os.getenv("NOTION_TOKEN"))
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+
+def send_discord_webhook(status, blog_name, title=None, error=None):
+    if not DISCORD_WEBHOOK_URL:
+        print("⚠️ Discord Webhook URL이 설정되지 않았습니다.")
+        return
+
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if status == "success":
+        color = 3066993  # Green
+        description = f"**{blog_name}** 저장 완료\n제목: {title}"
+        footer = "✅ 자동 발행 성공"
+    else:
+        color = 15158332  # Red
+        description = f"**{blog_name}** 최종 실패\n오류: {error}"
+        footer = "❌ 자동 발행 실패"
+
+    payload = {
+        "embeds": [{
+            "title": "Notion Auto Blog 알림",
+            "description": description,
+            "color": color,
+            "footer": {"text": f"{now} | {footer}"}
+        }]
+    }
+
+    try:
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
+        )
+        with urllib.request.urlopen(req) as response:
+            pass
+    except Exception as e:
+        print(f"Discord 알림 전송 중 오류 발생: {e}")
 
 # 블로그별 설정 및 프롬프트 강화
 COMMON_FORMAT = """
@@ -30,15 +80,10 @@ COMMON_FORMAT = """
 # [제목]
 키워드: [쉼표로 구분된 키워드 3-5개]
 참고링크: [관련된 신뢰할 수 있는 웹사이트 URL 하나]
-이미지: [주제와 어울리는 Unsplash 이미지 URL 예: https://images.unsplash.com/photo-...]
+이미지1: [주제와 어울리는 Unsplash 이미지 URL 1]
+이미지2: [주제와 어울리는 Unsplash 이미지 URL 2]
 ---
-[본문 내용]
-
-주의사항:
-1. 본문 내용은 반드시 한국어 기준 공백 포함 3,000자 이상의 매우 상세하고 풍부한 분량으로 작성해줘.
-2. 전문적이고 신뢰감 있는 문체를 사용해줘.
-3. 소제목을 활용하여 가독성을 높여줘.
-4. 모든 블로그 글에는 반드시 주제와 어울리는 고해상도 Unsplash 이미지 URL을 '이미지:' 항목에 포함해줘.
+[여기에 본문 내용을 3,000자 이상 아주 상세하게 작성하세요. 소제목을 여러 개 사용하고 가독성 있게 작성하세요.]
 """
 
 BLOG_TYPES = {
@@ -47,29 +92,46 @@ BLOG_TYPES = {
         "tags": "금융, 재테크, 경제"
     },
     "티스토리(행복한 세상)": {
-        "prompt": f"오늘은 {datetime.datetime.now().strftime('%Y-%m-%d')}입니다. 구독자들에게 실질적으로 도움이 되는 최신 생활 꿀팁, 복지 혜택, 정부 정책(지원금, 주거 지원 등)을 분석하여 누구나 쉽게 사용법을 이해할 수 있도록 '가이드형' 콘텐츠를 작성해줘. 정책의 배경부터 신청 방법, 유의사항까지 아주 상세하게 포함해줘." + COMMON_FORMAT,
-        "tags": "정부지원금, 생활정보, 꿀팁"
+        "prompt": f"""오늘은 {datetime.datetime.now().strftime('%Y-%m-%d')}입니다. 
+        당신은 인기 블로거입니다. 다음 순서로 작업하세요:
+        1. 현재 구글이나 네이버의 실시간 인기 검색어 또는 최신 생활 트렌드를 하나 선정하세요.
+        2. 그 주제에 대해 독자들에게 매우 유용하고 실질적인 정보를 제공하는 가이드형 글을 작성하세요.
+        3. 반드시 한국어 기준 공백 포함 3,000자 이상의 매우 방대한 분량으로 작성해야 합니다.
+        4. 정보의 정확성을 위해 구체적인 데이터나 절차를 포함하세요.
+        """ + COMMON_FORMAT,
+        "tags": "생활정보, 트렌드, 꿀팁"
     },
     "티스토리(매일 비평)": {
         "prompt": "오늘의 주요 사회, 문화, 또는 정치 이슈 중 하나를 선정해 다각도로 분석하고 날카로운 통찰을 담은 비평글을 작성해줘. 독자들이 생각할 거리를 던져주는 깊이 있는 논조를 유지해줘." + COMMON_FORMAT,
         "tags": "뉴스분석, 시사트렌드, 사회비평"
+    },
+    "티스토리(직장 생활)": {
+        "prompt": """당신은 15년 차 시니어 직장인이자 커리어 코치입니다. '슬기로운 직장생활'을 주제로 다음 지침에 따라 글을 작성하세요:
+        1. 주제 선정: 비즈니스 에티켓, 직장 내 대인관계 노하우, 커리어 성장(IT/자기계발), 효율적인 협업 도구 사용법, 또는 상사/동료와의 소통법 중 하나를 선택하세요.
+        2. 말투: '행복한 인생 광장' 블로그처럼 따뜻하면서도 전문적인 조언자의 톤을 유지하세요. (~하세요, ~입니다 체 사용)
+        3. 구성: '숫자'를 활용한 리스트(예: ~을 위한 팁 5가지)를 포함하고, 서론-본론-결론의 체계적인 구조로 작성하세요.
+        4. 분량: 반드시 한국어 기준 공백 포함 3,000자 이상의 매우 상세한 분량이어야 합니다. 실질적인 사례를 많이 포함하세요.
+        """ + COMMON_FORMAT,
+        "tags": "직장생활, 커리어, 슬기로운회사생활, 자기계발"
     }
 }
 
 def generate_content_with_retry(blog_name, prompt, max_retries=3):
-    # 기존 모델로 원복
-    model = genai.GenerativeModel('gemini-flash-latest')
-    
     for attempt in range(max_retries):
         try:
-            print(f"[{blog_name}] 글 생성 중... (시도 {attempt + 1}/{max_retries})")
-            response = model.generate_content(prompt)
+            target_model = 'gemini-flash-latest'
+            print(f"[{blog_name}] 글 생성 중... (모델: {target_model}, 시도 {attempt + 1}/{max_retries})")
+            
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt
+            )
             text = response.text
             
             if not text:
                 raise ValueError("API 응답에 텍스트가 없습니다.")
             
-            # 파싱 로직
+            # 파싱 로직 개선
             title_match = re.search(r'#\s*(.*)', text)
             title = title_match.group(1).strip() if title_match else "제목 없음"
             
@@ -79,28 +141,52 @@ def generate_content_with_retry(blog_name, prompt, max_retries=3):
             ref_link_match = re.search(r'참고링크:\s*(.*)', text)
             ref_link = ref_link_match.group(1).strip() if ref_link_match else ""
             
-            img_url_match = re.search(r'이미지:\s*(.*)', text)
-            img_url = img_url_match.group(1).strip() if img_url_match else ""
+            # 이미지 추출
+            img_urls = []
+            img_urls.extend(re.findall(r'이미지\d*:\s*(https?://\S+)', text))
+            if not img_urls:
+                single_img = re.search(r'이미지:\s*(https?://\S+)', text)
+                if single_img:
+                    img_urls = [single_img.group(1).strip()]
             
-            # 본문 추출 (--- 이후 또는 메타데이터 이후)
-            content = text.split('---')[-1].strip() if '---' in text else text
+            # 유효하지 않은 Unsplash URL (Hallucination) 방지 및 보정
+            fixed_img_urls = []
+            for url in img_urls:
+                if "unsplash.com" in url:
+                    # Unsplash 이미지가 깨질 경우를 대비해 랜덤 고해상도 키워드 추가
+                    if "?" not in url:
+                        url += "?auto=format&fit=crop&q=80&w=1080"
+                    fixed_img_urls.append(url)
             
-            # 3000자 미만일 경우 경고 메시지 출력 (재시도는 하지 않음 - 모델 특성상)
-            if len(content) < 3000:
-                print(f"⚠️ 경고: 생성된 내용이 {len(content)}자로 3000자 미만입니다.")
+            # 본문 추출 로직 강화 (구분선 기준 최장 텍스트 선택)
+            parts = text.split('---')
+            if len(parts) > 1:
+                # 메타데이터를 제외한 가장 긴 부분을 본문으로 간주
+                content = max(parts[1:], key=len).strip()
+            else:
+                content = text.strip()
+            
+            # 본문이 너무 짧으면 (파싱 실패 가능성) 전체 텍스트에서 제목/이미지 등만 제외 시도
+            if len(content) < 500:
+                print(f"⚠️ 본문 추출 결과가 너무 짧습니다 ({len(content)}자). 전체 텍스트를 사용합니다.")
+                content = text
+            
+            print(f"📝 추출된 본문 분량: {len(content)}자")
             
             return {
                 "title": title,
                 "keywords": keywords,
                 "ref_link": ref_link,
-                "img_url": img_url,
+                "img_urls": fixed_img_urls,
                 "content": content
             }
             
         except Exception as e:
             print(f"오류 발생: {e}")
-            if "429" in str(e):
-                time.sleep((attempt + 1) * 60)
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                wait_time = (attempt + 1) * 60
+                print(f"⏳ 할당량 부족. {wait_time}초 후 다시 시도합니다...")
+                time.sleep(wait_time)
             else:
                 time.sleep(5)
                 
@@ -115,55 +201,65 @@ def send_to_notion(blog_name, data):
         "주요 키워드": {"rich_text": [{"text": {"content": data["keywords"]}}]},
     }
     
-    # URL 형식 검증 후 추가
     if data["ref_link"].startswith("http"):
         properties["참고링크"] = {"url": data["ref_link"]}
     
-    # 이미지 파일 (외부 URL 방식) - 대표 이미지
-    if data["img_url"].startswith("http"):
+    if data["img_urls"] and data["img_urls"][0].startswith("http"):
         properties["이미지 파일"] = {
-            "files": [{"name": "MainImage", "type": "external", "external": {"url": data["img_url"]}}]
+            "files": [{"name": "MainImage", "type": "external", "external": {"url": data["img_urls"][0]}}]
         }
 
-    # 본문 내용을 Notion 블록 제한(2000자)에 맞춰 분할
     content_blocks = []
     
-    # 이미지 블록 추가 (본문 상단)
-    if data["img_url"].startswith("http"):
-        content_blocks.append({
-            "object": "block",
-            "type": "image",
-            "image": {
-                "type": "external",
-                "external": {"url": data["img_url"]}
-            }
-        })
+    # 1. 이미지 블록 추가 (유효한 URL만)
+    for url in data["img_urls"]:
+        if url.startswith("http"):
+            content_blocks.append({
+                "object": "block",
+                "type": "image",
+                "image": {"type": "external", "external": {"url": url}}
+            })
 
-    # 텍스트 블록 분할 추가
+    # 2. 본문 내용 추가
     content = data["content"]
+    # Notion API 제한으로 한 블록당 2000자씩 분할
     for i in range(0, len(content), 2000):
         chunk = content[i:i+2000]
-        content_blocks.append({
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]}
-        })
+        if chunk.strip():
+            content_blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{"type": "text", "text": {"content": chunk}}]
+                }
+            })
 
+    # Notion 페이지 생성 (최대 100개 블록 제한 주의)
     notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties=properties,
-        children=content_blocks
+        children=content_blocks[:100]
     )
 
 def main():
+    # 현재 요일 확인 (0: 월요일, 1: 화요일, ..., 6: 일요일)
+    weekday = datetime.datetime.now().weekday()
+    
     for blog_name, config in BLOG_TYPES.items():
+        # '티스토리(직장 생활)'은 월요일과 화요일(오늘)에 실행 (추후 필요시 다시 월요일로 복구 가능)
+        if blog_name == "티스토리(직장 생활)" and weekday not in [0, 1]:
+            print(f"⏭️ {blog_name}은 지정된 요일에만 발행됩니다. 오늘은 건너뜁니다.")
+            continue
+            
         try:
             data = generate_content_with_retry(blog_name, config["prompt"])
             send_to_notion(blog_name, data)
             print(f"✅ {blog_name} 저장 완료")
-            time.sleep(60) 
+            send_discord_webhook("success", blog_name, title=data["title"])
+            time.sleep(10)
         except Exception as e:
             print(f"❌ {blog_name} 최종 실패: {e}")
+            send_discord_webhook("error", blog_name, error=str(e))
 
 if __name__ == '__main__':
     main()
