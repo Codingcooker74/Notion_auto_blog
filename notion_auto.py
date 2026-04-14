@@ -118,16 +118,17 @@ BLOG_TYPES = {
         1. 주제 선정: 비즈니스 에티켓, 직장 내 대인관계 노하우, 커리어 성장(IT/자기계발), 효율적인 협업 도구 사용법, 또는 상사/동료와의 소통법 중 하나를 선택하세요.
         2. 말투: '행복한 인생 광장' 블로그처럼 따뜻하면서도 전문적인 조언자의 톤을 유지하세요. (~하세요, ~입니다 체 사용)
         3. 구성: '숫자'를 활용한 리스트(예: ~을 위한 팁 5가지)를 포함하고, 서론-본론-결론의 체계적인 구조로 작성하세요.
-        4. 분량: 반드시 한국어 기준 공백 포함 3,000자 이상의 매우 상세한 분량이어야 합니다. 실질적인 사례를 많이 포함하세요.
+        4. 분량: 반드시 한국어 기준 공백 포함 2,000자 이상의 상세한 분량이어야 합니다. 실질적인 사례를 많이 포함하세요.
         """ + COMMON_FORMAT,
         "tags": "직장생활, 커리어, 슬기로운회사생활, 자기계발"
     }
 }
 
 def generate_content_with_retry(blog_name, prompt, max_retries=3):
+    last_error = "알 수 없는 오류"
     for attempt in range(max_retries):
         try:
-            target_model = 'gemini-flash-latest'
+            target_model = 'gemini-1.5-flash'
             print(f"[{blog_name}] 글 생성 중... (모델: {target_model}, 시도 {attempt + 1}/{max_retries})")
             
             response = client.models.generate_content(
@@ -190,15 +191,16 @@ def generate_content_with_retry(blog_name, prompt, max_retries=3):
             }
             
         except Exception as e:
-            print(f"오류 발생: {e}")
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            last_error = str(e)
+            print(f"오류 발생: {last_error}")
+            if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
                 wait_time = (attempt + 1) * 60
                 print(f"⏳ 할당량 부족. {wait_time}초 후 다시 시도합니다...")
                 time.sleep(wait_time)
             else:
                 time.sleep(5)
                 
-    raise Exception("글 생성 실패")
+    raise Exception(f"글 생성 실패: {last_error}")
 
 def send_to_notion(blog_name, data):
     properties = {
