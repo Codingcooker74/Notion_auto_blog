@@ -15,7 +15,7 @@ except Exception:
     pass
 
 from notion_client import Client
-from google import genai
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -32,13 +32,14 @@ if missing_vars:
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-# 신형 라이브러리 클라이언트 초기화
-client = genai.Client(api_key=GEMINI_API_KEY)
+# 라이브러리 설정 및 인증 (기존의 검증된 방식)
+genai.configure(api_key=GEMINI_API_KEY)
 
 notion = Client(auth=os.getenv("NOTION_TOKEN"))
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
 def send_discord_webhook(status, blog_name, title=None, error=None):
+# (기존 함수 유지)
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ Discord Webhook URL이 설정되지 않았습니다. 알림을 건너뜁니다.")
         return
@@ -128,13 +129,11 @@ def generate_content_with_retry(blog_name, prompt, max_retries=3):
     last_error = "알 수 없는 오류"
     for attempt in range(max_retries):
         try:
-            target_model = 'gemini-1.5-flash'
-            print(f"[{blog_name}] 글 생성 중... (모델: {target_model}, 시도 {attempt + 1}/{max_retries})")
+            target_model_name = 'gemini-1.5-flash'
+            print(f"[{blog_name}] 글 생성 중... (모델: {target_model_name}, 시도 {attempt + 1}/{max_retries})")
             
-            response = client.models.generate_content(
-                model=target_model,
-                contents=prompt
-            )
+            model = genai.GenerativeModel(target_model_name)
+            response = model.generate_content(prompt)
             text = response.text
             
             if not text:
