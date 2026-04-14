@@ -18,25 +18,26 @@ from notion_client import Client
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# .env 파일 로드
+# .env 파일 로드 (로컬 환경용)
 load_dotenv()
 
-# 환경 변수 필수 체크
-required_env_vars = ["NOTION_TOKEN", "NOTION_DATABASE_ID", "GEMINI_API_KEY"]
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+NOTION_TOKEN = os.getenv("NOTION_TOKEN", "").strip()
+NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID", "").strip()
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 
-if missing_vars:
-    print(f"❌ 오류: 다음 환경 변수가 설정되지 않았습니다: {', '.join(missing_vars)}")
+# API 키 유효성 확인 및 디버깅 로그 (보안을 위해 앞뒤 2자만 출력)
+if GEMINI_API_KEY:
+    print(f"🔑 Gemini API Key 확인: {GEMINI_API_KEY[:2]}...{GEMINI_API_KEY[-2:]} (길이: {len(GEMINI_API_KEY)})")
+else:
+    print("❌ 오류: GEMINI_API_KEY 환경 변수가 비어 있습니다.")
     sys.exit(1)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-
-# 라이브러리 설정 및 인증 (기존의 검증된 방식)
+# 라이브러리 설정 및 인증
 genai.configure(api_key=GEMINI_API_KEY)
 
-notion = Client(auth=os.getenv("NOTION_TOKEN"))
-DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+notion = Client(auth=NOTION_TOKEN)
+DATABASE_ID = NOTION_DATABASE_ID
 
 def send_discord_webhook(status, blog_name, title=None, error=None):
 # (기존 함수 유지)
