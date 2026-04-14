@@ -40,7 +40,7 @@ DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
 def send_discord_webhook(status, blog_name, title=None, error=None):
     if not DISCORD_WEBHOOK_URL:
-        print("⚠️ Discord Webhook URL이 설정되지 않았습니다.")
+        print("⚠️ Discord Webhook URL이 설정되지 않았습니다. 알림을 건너뜁니다.")
         return
 
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -63,16 +63,24 @@ def send_discord_webhook(status, blog_name, title=None, error=None):
         }]
     }
 
+    print(f"📡 Discord 웹후크 전송 시도 중... (상태: {status}, 블로그: {blog_name})")
     try:
+        data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             DISCORD_WEBHOOK_URL,
-            data=json.dumps(payload).encode('utf-8'),
+            data=data,
             headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
         )
         with urllib.request.urlopen(req) as response:
-            pass
+            if response.status in [200, 204]:
+                print(f"✨ Discord 알림 전송 성공! (HTTP {response.status})")
+            else:
+                print(f"⚠️ Discord 알림 전송 결과 (HTTP {response.status})")
+    except urllib.error.HTTPError as e:
+        print(f"❌ Discord 웹후크 HTTP 오류: {e.code} {e.reason}")
+        print(f"   내용: {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
-        print(f"Discord 알림 전송 중 오류 발생: {e}")
+        print(f"❌ Discord 웹후크 일반 오류: {e}")
 
 # 블로그별 설정 및 프롬프트 강화
 COMMON_FORMAT = """
