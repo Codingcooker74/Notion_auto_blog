@@ -130,7 +130,7 @@ def generate_content_with_retry(blog_name, prompt, max_retries=3):
     last_error = "알 수 없는 오류"
     for attempt in range(max_retries):
         try:
-            target_model_name = 'gemini-1.5-flash'
+            target_model_name = 'gemini-flash-latest'
             print(f"[{blog_name}] 글 생성 중... (모델: {target_model_name}, 시도 {attempt + 1}/{max_retries})")
             
             model = genai.GenerativeModel(target_model_name)
