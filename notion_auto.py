@@ -126,15 +126,41 @@ BLOG_TYPES = {
     }
 }
 
-def generate_content_with_retry(blog_name, prompt, max_retries=3):
+def get_recent_titles():
+    """노션에서 최근 작성된 글 제목 10개를 가져옵니다."""
+    try:
+        response = notion.databases.query(
+            database_id=DATABASE_ID,
+            page_size=10,
+            sorts=[{"property": "작성일", "direction": "descending"}]
+        )
+        titles = []
+        for page in response.get("results", []):
+            title_property = page["properties"].get("글 제목", {}).get("title", [])
+            if title_property:
+                titles.append(title_property[0]["plain_text"])
+        return titles
+    except Exception as e:
+        print(f"⚠️ 최근 제목을 가져오는 중 오류 발생: {e}")
+        return []
+
+def generate_content_with_retry(blog_name, prompt, recent_titles, max_retries=3):
     last_error = "알 수 없는 오류"
+    
+    # 중복 방지 지침 추가
+    avoid_instruction = ""
+    if recent_titles:
+        avoid_instruction = f"\n\n[중요: 다음은 최근에 이미 작성된 주제들입니다. 이와 유사하거나 중복되는 주제는 '절대' 피해서 완전히 새로운 주제를 선정하세요]\n- " + "\n- ".join(recent_titles)
+    
+    enhanced_prompt = prompt + avoid_instruction + "\n\n항상 새로운 관점에서 독창적인 제목과 본문을 작성하세요. 이전 글과 형식이 비슷하더라도 '내용'은 완전히 차별화되어야 합니다."
+
     for attempt in range(max_retries):
         try:
             target_model_name = 'gemini-flash-latest'
             print(f"[{blog_name}] 글 생성 중... (모델: {target_model_name}, 시도 {attempt + 1}/{max_retries})")
             
             model = genai.GenerativeModel(target_model_name)
-            response = model.generate_content(prompt)
+            response = model.generate_content(enhanced_prompt)
             text = response.text
             
             if not text:
@@ -255,6 +281,12 @@ def main():
     # 현재 요일 확인 (0: 월요일, 1: 화요일, ..., 6: 일요일)
     weekday = datetime.datetime.now().weekday()
     
+    # 최근 발행된 제목들 가져오기 (중복 방지용)
+    print("🔍 최근 발행된 글 제목들을 확인 중입니다...")
+    recent_titles = get_recent_titles()
+    if recent_titles:
+        print(f"📌 발견된 최근 제목 ({len(recent_titles)}개): {', '.join(recent_titles[:3])}...")
+    
     for blog_name, config in BLOG_TYPES.items():
         # '티스토리(직장 생활)'은 월요일과 화요일(오늘)에 실행 (추후 필요시 다시 월요일로 복구 가능)
         if blog_name == "티스토리(직장 생활)" and weekday not in [0, 1]:
@@ -262,10 +294,15 @@ def main():
             continue
             
         try:
-            data = generate_content_with_retry(blog_name, config["prompt"])
+            # 최근 제목들을 인자로 전달
+            data = generate_content_with_retry(blog_name, config["prompt"], recent_titles)
             send_to_notion(blog_name, data)
             print(f"✅ {blog_name} 저장 완료")
             send_discord_webhook("success", blog_name, title=data["title"])
+            
+            # 생성된 제목을 목록에 추가 (동일 실행 세션 내 중복 방지)
+            recent_titles.append(data["title"])
+            
             time.sleep(10)
         except Exception as e:
             print(f"❌ {blog_name} 최종 실패: {e}")
